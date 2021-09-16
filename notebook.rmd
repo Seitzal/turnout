@@ -1,0 +1,545 @@
+
+# Clean up and load libraries
+```{r}
+rm(list = ls())
+options(scipen = 4)
+library(QCA)
+library(tidyverse)
+library(lubridate)
+library(pcse)
+```
+
+# Data importing & cleaning
+
+## Load turnout dataset
+```{r}
+ds <- read.csv("dataset.csv")
+```
+
+## Load parlgov election view
+```{r}
+# Country-level aggregates
+pg <- left_join(
+  read.csv("pg_elec.csv") %>% select(election_id, country_name, country_name_short, election_type, election_date),
+  read.csv("pg_elec_calc.csv") %>% select(election_id, turnout)
+) %>% unique() %>% mutate(Year = year(ymd(election_date)))
+
+# Individual party results
+pg.party <- 
+  read.csv("pg_elec.csv") %>% 
+  select(election_id, country_name, election_type, election_date, party_id, vote_share) %>%
+  mutate(Year = year(ymd(election_date))) %>%
+  filter(election_type == "ep")
+```
+
+## Load PopuList
+```{r echo=FALSE, warning=FALSE}
+populist <- read.csv("populist_v2.csv") %>% mutate(party_id = parlgov_id)
+```
+
+## Load data on national parliamentary terms
+```{r}
+terms <- read.csv("terms.csv")
+```
+
+## Load OECD employment data
+```{r}
+agr.oecd <- left_join(
+  read.csv("oecd_sector.csv") %>% select(Code = LOCATION, Year = TIME, Agr = Value),
+  read.csv("oecd_lf.csv") %>% select(Code = LOCATION, Year = TIME, LF = Value)
+) %>% left_join(
+  read.csv("oecd_codes.csv")
+) %>%
+  mutate(AgrShare = Agr / LF) %>%
+  filter(!is.na(Country)) %>%
+  select(Country, Year, AgrShare)
+```
+
+## Load ILO employment data
+```{r}
+agr.ilostat <- read.csv("ilostat.csv") %>% 
+  select(
+    Country = ref_area.label,
+    Year = time,
+    Var = classif1.label,
+    Val = obs_value)
+agr.ilostat <- left_join(
+  agr.ilostat %>% 
+    filter(Var == "Economic activity (Aggregate): Agriculture") %>% 
+    select(Country, Year, Agr = Val),
+  agr.ilostat %>%
+    filter(Var == "Economic activity (Aggregate): Total") %>%
+    select(Country, Year, Total = Val)
+) %>%
+  mutate(AgrShare = Agr / Total)
+```
+
+## Merge employment datasets
+```{r}
+agr <- full_join(
+  agr.oecd %>% select(Country, Year, AgrShareOecd = AgrShare),
+  agr.ilostat %>% select(Country, Year, AgrShareIlostat = AgrShare)
+) %>% mutate(AgrShare = rowMeans(cbind(AgrShareOecd, AgrShareIlostat), na.rm = T))
+```
+
+## Calculate eurosceptic vote shares
+```{r}
+euscep <- 
+  left_join(pg.party, populist, by = "party_id") %>%
+  filter((eurosceptic_startnobl <= Year & eurosceptic_endnobl > Year)) %>%
+  rename(Country = country_name.x) %>%
+  group_by(Country, Year) %>%
+  summarise(EuroscepticVoteShare = sum(vote_share) / 100)
+```
+
+## Merge all datasets together
+```{r}
+ds <- ds %>% left_join(
+  pg %>% 
+    filter(election_type == "ep") %>% 
+    select(Country = country_name, CountryShort = country_name_short, Year, TurnoutPG = turnout, Date = election_date)
+) %>%   
+  left_join(terms) %>%
+  left_join(agr %>% select(Country, Year, AgrShare)) %>%
+  left_join(euscep) %>%
+  mutate(EuroscepticVoteShare = replace(EuroscepticVoteShare, is.na(EuroscepticVoteShare), 0)) %>%
+  mutate(label = paste(CountryShort, Year, sep = "")) %>%
+  drop_na()
+```
+
+## Derive national election variables
+```{r}
+last_national_election <- function(country, date) {
+  res <- pg %>% filter(election_type == "parliament" & country_name == country & election_date < date)
+  max(res$election_date)
+}
+
+ds <- ds %>% mutate(LastNational = mapply(last_national_election, Country, Date))
+ds <- ds %>% mutate(Cycle = (interval(LastNational, Date) %/% days(1)) / (365.25 * Term))
+ds <- ds %>% mutate(CycleM = interval(LastNational, Date) %/% months(1))
+ds <- left_join(ds, pg %>% filter(election_type == "parliament") %>% select(Country = country_name, LastNational = election_date, LastNationalTurnout = turnout))
+```
+
+## Calculate eurogap
+```{r}
+ds <- ds %>% mutate(Eurogap = LastNationalTurnout - Turnout)
+```
+
+## Define base years
+
+For regular EU-wide elections, this refers to the respective election year.
+For irregular elections conducted on accession, this refers to the previous regular EU-wide election year.
+```{r}
+# Decide which calibration to use based on election year
+ds <- ds %>% mutate(BaseYear = case_when(
+  Year <  1984               ~ 1979,
+  Year >= 1984 & Year < 1989 ~ 1984,
+  Year >= 1989 & Year < 1994 ~ 1989,
+  Year >= 1994 & Year < 1999 ~ 1994,
+  Year >= 1999 & Year < 2004 ~ 1999,
+  Year >= 2004 & Year < 2009 ~ 2004,
+  Year >= 2009 & Year < 2014 ~ 2009,
+  Year >= 2014 & Year < 2019 ~ 2014,
+  Year >= 2019               ~ 2019))
+```
+
+## Label cases
+
+```{r}
+rownames(ds) <- ds$label
+```
+
+# Definition and calibration of sets for QCA
+
+## T = Turnout (Outcome)
+We want to calibrate with reference to election year, to focus on cross-country differences.
+Post-accession elections should be calibrated based on the previous EU-wide election year.
+```{r}
+# Function to compute turnout quantiles for a given election year
+qT <- function (year) {
+  q <- quantile(filter(ds, Year == year)$Turnout, probs = c(0.2, 0.5, 0.8))
+  q[2] <- q[2] - .001 # Slightly offset median to avoid perfect .5 membership scores
+  q
+}
+# Calibrations with reference to all EU-wide election years
+ds$T1979 <- calibrate(ds$Turnout, thresholds = qT(1979)) %>% round(digits = 4)
+ds$T1984 <- calibrate(ds$Turnout, thresholds = qT(1984)) %>% round(digits = 4)
+ds$T1989 <- calibrate(ds$Turnout, thresholds = qT(1989)) %>% round(digits = 4)
+ds$T1994 <- calibrate(ds$Turnout, thresholds = qT(1994)) %>% round(digits = 4)
+ds$T1999 <- calibrate(ds$Turnout, thresholds = qT(1999)) %>% round(digits = 4)
+ds$T2004 <- calibrate(ds$Turnout, thresholds = qT(1994)) %>% round(digits = 4)
+ds$T2009 <- calibrate(ds$Turnout, thresholds = qT(2009)) %>% round(digits = 4)
+ds$T2014 <- calibrate(ds$Turnout, thresholds = qT(2014)) %>% round(digits = 4)
+ds$T2019 <- calibrate(ds$Turnout, thresholds = qT(2019)) %>% round(digits = 4)
+# Decide which calibration to use based on election year
+ds <- ds %>% mutate(T = case_when(
+  BaseYear == 1979 ~ T1979,
+  BaseYear == 1984 ~ T1984,
+  BaseYear == 1989 ~ T1989,
+  BaseYear == 1994 ~ T1994,
+  BaseYear == 1999 ~ T1999,
+  BaseYear == 2004 ~ T2004,
+  BaseYear == 2009 ~ T2009,
+  BaseYear == 2014 ~ T2014,
+  BaseYear == 2019 ~ T2019))
+plot(ds$Turnout, ds$T)
+```
+
+## G = Eurogap (Outcome)
+```{r}
+ds$G = calibrate(ds$Eurogap, thresholds = c(10,20,30))
+plot(ds$Eurogap, ds$G)
+```
+
+
+## C = Compulsory Voting (Crisp Condition)
+```{r}
+ds$C <- 0
+ds$C[ds$Country %in% c("Belgium", "Greece", "Luxembourg")] <- 1
+ds$C[ds$Country == "Italy" & ds$Year <= 1993] <- 1
+ds$C[ds$Country == "Cyprus" & ds$Year <= 2017] <- 1
+ds$C[ds$Country == "Bulgaria" & ds$Year >= 2016] <- 1
+```
+
+## N = Turnout at previous national (Fuzzy Condition)
+```{r}
+qN <- quantile(ds$LastNationalTurnout, probs = c(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9))
+qN
+```
+
+```{r}
+ds$N <- ds$LastNationalTurnout %>% calibrate(thresholds = c(qN[2], qN[5] + 1, qN[8])) %>% round(digits = 4)
+plot(ds$LastNationalTurnout, ds$N)
+```
+
+## E = Time in national election cycle (Fuzzy Condition)
+```{r}
+ds$E <- ds$Cycle %>% calibrate(thresholds = c(0.25, 0.5, 0.75)) %>% round(digits = 4)
+plot(ds$Cycle, ds$E)
+```
+
+## H = Institution host country? (Crisp Condition)
+```{r}
+ds$H <- 0
+ds$H[ds$Country %in% c("Belgium", "Luxembourg", "France")] <- 1
+ds$H[ds$Country == "Germany" & ds$Year >= 1999] <- 1
+```
+
+## A = Agrarian economy? (Fuzzy Condition)
+```{r}
+qA <- quantile(ds$AgrShare, probs = c(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9))
+qA
+```
+
+```{r}
+ds$A <- ds$AgrShare %>% calibrate(thresholds = c(qA[2], qA[5] + .000001, qA[8])) %>% round(digits = 4)
+plot(ds$AgrShare, ds$A)
+```
+
+## L = Lead candidates from the country? (Crisp Condition)
+```{r}
+ds <- ds %>% mutate(L = LeadCandidate)
+```
+
+## S = Prominent euroscepticism? (Fuzzy condition)
+```{r}
+ds$S <- ds$EuroscepticVoteShare %>% calibrate(thresholds = c(0, 0.1, 0.3)) %>% round(digits = 4)
+plot(ds$EuroscepticVoteShare, ds$S)
+```
+
+# OLS Regressions
+```{r}
+ds.reg <- ds %>% mutate(
+  AgrShare = AgrShare * 100,
+  Country = as.factor(Country),
+  Year_ = as.factor(Year))
+```
+
+## Turnout
+
+### Model 4 (Flickinger & Studlar 2007)
+```{r}
+reg1 <- lm(
+  data = ds.reg,
+  formula = Turnout ~ C + CycleM + LastNationalTurnout + H + AgrShare + Year_)
+reg1.pcse <- pcse(
+  object = reg1,
+  groupN = ds.reg$Country,
+  groupT = ds.reg$Year,
+  pairwise = TRUE)
+summary(reg1)
+summary(reg1.pcse)
+```
+
+### Model 4 + Euroscepticism & Lead Candidates
+```{r}
+reg2 <- lm(
+  data = ds.reg,
+  formula = Turnout ~ C + CycleM + LastNationalTurnout + H + AgrShare + LeadCandidate + EuroscepticVoteShare + Year_)
+reg2.pcse <- pcse(
+  object = reg2,
+  groupN = ds.reg$Country, 
+  groupT = ds.reg$Year, 
+  pairwise = TRUE)
+summary(reg2)
+summary(reg2.pcse)
+```
+
+### Model 4 without national turnout
+```{r}
+reg3 <- lm(
+  data = ds.reg,
+  formula = Turnout ~ C + CycleM + H + AgrShare + Year_)
+reg3.pcse <- pcse(
+  object = reg3,
+  groupN = ds.reg$Country,
+  groupT = ds.reg$Year,
+  pairwise = TRUE)
+summary(reg3)
+summary(reg3.pcse)
+```
+
+## Eurogap
+
+### Model 4
+```{r}
+reg4 <- lm(
+  data = ds.reg,
+  formula = Eurogap ~ C + CycleM + H + AgrShare + Year_)
+reg4.pcse <- pcse(
+  object = reg4,
+  groupN = ds.reg$Country,
+  groupT = ds.reg$Year,
+  pairwise = TRUE)
+summary(reg4)
+summary(reg4.pcse)
+```
+
+### Model 4 + Euroscepticism & Lead Candidates
+```{r}
+reg5 <- lm(
+  data = ds.reg,
+  formula = Eurogap ~ C + CycleM + H + AgrShare + LeadCandidate + EuroscepticVoteShare + Year_)
+reg5.pcse <- pcse(
+  object = reg5,
+  groupN = ds.reg$Country, 
+  groupT = ds.reg$Year, 
+  pairwise = TRUE)
+summary(reg5)
+summary(reg5.pcse)
+```
+
+# Qualitative Comparative Analysis
+
+## Model 4 (Flickinger & Studlar 2007)
+
+### Select variables and directional expectations
+```{r}
+qca1.ds <- ds %>% select(T, C, N, E, H, A)
+qca1.direxp.high = "1,1,1,1,1"
+qca1.direxp.low = "0,0,0,0,0"
+qca1.cutoff = ".8"
+qca1.method = "QMC"
+```
+
+### Positive outcome (high turnout)
+
+#### truth table
+```{r}
+qca1.high.tt <- truthTable(
+  data = qca1.ds,
+  outcome = "T",
+  show.cases = TRUE,
+  incl.cut = qca1.cutoff)
+qca1.high.tt
+```
+
+#### Conservative solution
+```{r}
+qca1.high.conserv <- minimize(qca1.high.tt, details = TRUE, method = qca1.method)
+qca1.high.conserv
+```
+
+#### Parsimonious solution
+```{r}
+qca1.high.parsim <- minimize(qca1.high.tt, include = "?", details = TRUE, method = qca1.method)
+qca1.high.parsim
+```
+
+#### Intermediate solution
+```{r}
+qca1.high.interm <- minimize(qca1.high.tt, include = "?", dir.exp = qca1.direxp.high, details = TRUE, method = qca1.method)
+qca1.high.interm
+```
+
+### Negative outcome (low turnout)
+
+#### Truth table
+```{r}
+qca1.low.tt <- truthTable(
+  data = qca1.ds, 
+  outcome = "~T", 
+  show.cases = TRUE,
+  incl.cut = qca1.cutoff)
+qca1.low.tt
+```
+
+#### Conservative solution
+```{r}
+qca1.low.conserv <- minimize(qca1.low.tt, details = TRUE, method = qca1.method)
+qca1.low.conserv
+```
+
+#### Parsimonious solution
+```{r}
+qca1.low.parsim <- minimize(qca1.low.tt, include = "?", details = TRUE, method = qca1.method)
+qca1.low.parsim
+```
+
+#### Intermediate solution
+```{r}
+qca1.low.interm <- minimize(qca1.low.tt, include = "?", dir.exp = qca1.direxp.low, details = TRUE, method = qca1.method)
+qca1.low.interm
+```
+
+## Model 4 + Euroscepticism + Lead Candidates
+
+### Select variables and directional expectations
+```{r}
+qca2.ds <- ds %>% select(T, C, N, E, H, A, L, S)
+qca2.direxp.high = "1,1,1,1,1,1,1"
+qca2.direxp.low = "0,0,0,0,0,0,0"
+qca2.cutoff = ".8"
+qca2.method = "QMC"
+```
+
+### Positive outcome (high turnout)
+
+#### truth table
+```{r}
+qca2.high.tt <- truthTable(
+  data = qca2.ds,
+  outcome = "T",
+  show.cases = TRUE,
+  incl.cut = qca2.cutoff)
+qca2.high.tt
+```
+
+#### Conservative solution
+```{r}
+qca2.high.conserv <- minimize(qca2.high.tt, details = TRUE, method = qca2.method)
+qca2.high.conserv
+```
+
+#### Parsimonious solution
+```{r}
+qca2.high.parsim <- minimize(qca2.high.tt, include = "?", details = TRUE, method = qca2.method)
+qca2.high.parsim
+```
+
+#### Intermediate solution
+```{r}
+qca2.high.interm <- minimize(qca2.high.tt, include = "?", dir.exp = qca2.direxp.high, details = TRUE, method = qca2.method)
+qca2.high.interm
+```
+
+### Negative outcome (low turnout)
+
+#### Truth table
+```{r}
+qca2.low.tt <- truthTable(
+  data = qca2.ds, 
+  outcome = "~T", 
+  show.cases = TRUE,
+  incl.cut = qca2.cutoff)
+qca2.low.tt
+```
+
+#### Conservative solution
+```{r}
+qca2.low.conserv <- minimize(qca2.low.tt, details = TRUE, method = qca2.method)
+qca2.low.conserv
+```
+
+#### Parsimonious solution
+```{r}
+qca2.low.parsim <- minimize(qca2.low.tt, include = "?", details = TRUE, method = qca2.method)
+qca2.low.parsim
+```
+
+#### Intermediate solution
+```{r}
+qca2.low.interm <- minimize(qca2.low.tt, include = "?", dir.exp = qca2.direxp.low, details = TRUE, method = qca2.method)
+qca2.low.interm
+```
+
+## Eurogap Model 4
+
+### Select variables and directional expectations
+```{r}
+qca3.ds <- ds %>% select(G, C, E, H, A)
+qca3.direxp.high = "0,0,0,0"
+qca3.direxp.low = "1,1,1,1"
+qca3.cutoff = ".8"
+qca3.method = "QMC"
+```
+
+### Positive outcome (high turnout)
+
+#### truth table
+```{r}
+qca3.high.tt <- truthTable(
+  data = qca3.ds,
+  outcome = "G",
+  show.cases = TRUE,
+  incl.cut = qca3.cutoff)
+qca3.high.tt
+```
+
+#### Conservative solution
+```{r}
+qca3.high.conserv <- minimize(qca3.high.tt, details = TRUE, method = qca3.method)
+qca3.high.conserv
+```
+
+#### Parsimonious solution
+```{r}
+qca3.high.parsim <- minimize(qca3.high.tt, include = "?", details = TRUE, method = qca3.method)
+qca3.high.parsim
+```
+
+#### Intermediate solution
+```{r}
+qca3.high.interm <- minimize(qca3.high.tt, include = "?", dir.exp = qca3.direxp.high, details = TRUE, method = qca3.method)
+qca3.high.interm
+```
+
+### Negative outcome (low turnout)
+
+#### Truth table
+```{r}
+qca3.low.tt <- truthTable(
+  data = qca3.ds, 
+  outcome = "~G", 
+  show.cases = TRUE,
+  incl.cut = qca3.cutoff)
+qca3.low.tt
+```
+
+#### Conservative solution
+```{r}
+qca3.low.conserv <- minimize(qca3.low.tt, details = TRUE, method = qca3.method)
+qca3.low.conserv
+```
+
+#### Parsimonious solution
+```{r}
+qca3.low.parsim <- minimize(qca3.low.tt, include = "?", details = TRUE, method = qca3.method)
+qca3.low.parsim
+```
+
+#### Intermediate solution
+```{r}
+qca3.low.interm <- minimize(qca3.low.tt, include = "?", dir.exp = qca3.direxp.low, details = TRUE, method = qca3.method)
+qca3.low.interm
+```

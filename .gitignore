@@ -1,4 +1,6 @@
 *.html
+*.odt
 *.Rproj
 *.Rhistory*
 .Rproj.user/
+main.tex
