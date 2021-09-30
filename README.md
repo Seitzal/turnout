@@ -1,7 +1,7 @@
 # *Still one Europe, still many electorates*: Ein aktualisiertes Modell zur Wahlbeteiligung bei Europawahlen
 A. Seitz, 2021
 
-[Link to PDF](https://github.com/Seitzal/climatepsych/blob/default/main.pdf)
+[Link to PDF](https://github.com/Seitzal/turnout/blob/default/main.pdf)
 
 ## Replication instructions
 
