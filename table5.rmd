@@ -1,0 +1,17 @@
+```{r 5, warning=FALSE}
+kable(
+  x = qca2.high.tt$tt %>%
+    mutate(Zeile = seq.int(1, nrow(qca2.high.tt$tt))) %>%
+    select(Zeile, C, H, E, A, S, G = OUT, n) %>%
+    mutate(
+      `Inkl.(G)` = as.numeric(qca2.high.tt$tt$incl),
+      `PRI(G)` = as.numeric(qca2.high.tt$tt$PRI),
+      `Inkl.(~G)` = as.numeric(qca2.low.tt$tt$incl),
+      `PRI(~G)` = as.numeric(qca2.low.tt$tt$PRI)),
+  caption = "Wahrheitstabelle Eurogap",
+  format = "latex",
+  digits = 3,
+  linesep = c(""),
+  align = "rllllllrrrrr",
+  booktabs = TRUE)
+```

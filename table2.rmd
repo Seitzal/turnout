@@ -1,0 +1,64 @@
+```{r}
+sreg3 <- summary(reg3)
+sreg4 <- summary(reg4)
+anova34 <- anova(reg3, reg4)
+report_reg3 <- function(i){
+  str_glue("{round_(reg3$coefficients[i])} & {round_(reg3.pcse$pcse[i])} & {stars.pval(reg3.pcse$pval[i])}")
+}
+report_reg4 <- function(i){
+  str_glue("{round_(reg4$coefficients[i])} & {round_(reg4.pcse$pcse[i])} & {stars.pval(reg4.pcse$pval[i])}")
+}
+```
+\begin{table}[ht]
+\centering
+\begin{threeparttable}[ht]
+\caption{OLS-Regression: Eurogap}
+\label{table:2}
+\begin{tabular}{lrllrll}
+\toprule
+& \multicolumn{3}{c}{Modell 1} & \multicolumn{3}{c}{Modell 2}\\
+& $\beta$ & PCSE & & $\beta$ & PCSE & \\
+\midrule
+(Achsenabschnitt) & `r report_reg3(1)` & `r report_reg4(1)`\\
+\addlinespace
+Wahlpflicht & `r report_reg3(2)` & `r report_reg4(2)`\\
+Wahlzyklus & `r report_reg3(3)` & `r report_reg4(3)`\\
+Institutionssitz & `r report_reg3(4)` & `r report_reg4(4)`\\
+Landw. Beschäft. & `r report_reg3(5)` & `r report_reg4(5)`\\
+\addlinespace
+Spitzenkandidat*in & & & & `r report_reg4(6)`\\
+Euroskepsis & & & & `r report_reg4(7)`\\
+\addlinespace
+Jahr 1981 & `r report_reg3(6)` & `r report_reg4(8)`\\
+Jahr 1984 & `r report_reg3(7)` & `r report_reg4(9)`\\
+Jahr 1987 & `r report_reg3(8)` & `r report_reg4(10)`\\
+Jahr 1989 & `r report_reg3(9)` & `r report_reg4(11)`\\
+Jahr 1994 & `r report_reg3(10)` & `r report_reg4(12)`\\
+Jahr 1995 & `r report_reg3(11)` & `r report_reg4(13)`\\
+Jahr 1996 & `r report_reg3(12)` & `r report_reg4(14)`\\
+Jahr 2099 & `r report_reg3(13)` & `r report_reg4(15)`\\
+Jahr 2004 & `r report_reg3(14)` & `r report_reg4(16)`\\
+Jahr 2007 & `r report_reg3(15)` & `r report_reg4(17)`\\
+Jahr 2009 & `r report_reg3(16)` & `r report_reg4(18)`\\
+Jahr 2013 & `r report_reg3(17)` & `r report_reg4(19)`\\
+Jahr 2014 & `r report_reg3(18)` & `r report_reg4(20)`\\
+Jahr 2019 & `r report_reg3(19)` & `r report_reg4(21)`\\
+\midrule
+$R^{2}$ &
+\multicolumn{3}{c}{`r round_(sreg3$r.squared)`} & 
+\multicolumn{3}{c}{`r round_(sreg4$r.squared)`}\\
+Freiheitsgrade &
+\multicolumn{3}{c}{`r sreg3$fstatistic[2]`/`r sreg3$fstatistic[3]`} &
+\multicolumn{3}{c}{`r sreg4$fstatistic[2]`/`r sreg4$fstatistic[3]`}\\
+$SQ_{Rest}$ &
+\multicolumn{3}{c}{`r round_(anova34[1,2])`} &
+\multicolumn{3}{c}{`r round_(anova34[2,2])`}\\
+$F$-Test & & & &
+\multicolumn{3}{r}{$F =$ `r round_(anova34[2,5])`, $p =$ `r round_(anova34[2,6])`}\\
+\bottomrule
+\end{tabular}
+\begin{tablenotes}
+\item *** $p < 0,001$; **  $p < 0,01$; * $p < 0,05$; . $p < 0,1$
+\end{tablenotes}
+\end{threeparttable}
+\end{table}

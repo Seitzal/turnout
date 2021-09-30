@@ -1,0 +1,23 @@
+\renewcommand\arraystretch{.7}
+```{r 4, warning=FALSE}
+kable(
+  x = qca1.high.tt$tt %>%
+    mutate(Zeile = seq.int(1, nrow(qca1.high.tt$tt))) %>%
+    select(Zeile, C, H, N, E, A, S, T = OUT, n) %>%
+    mutate(
+      `Inkl.(T)` = as.numeric(qca1.high.tt$tt$incl),
+      `PRI(T)` = as.numeric(qca1.high.tt$tt$PRI),
+      `Inkl.(~T)` = as.numeric(qca1.low.tt$tt$incl),
+      `PRI(~T)` = as.numeric(qca1.low.tt$tt$PRI)),
+  caption = "Wahrheitstabelle Wahlbeteiligung",
+  format = "latex",
+  digits = 3,
+  linesep = c(""),
+  align = "rlllllllrrrrr",
+  booktabs = TRUE,
+  longtable = TRUE) %>%
+  kable_styling(
+    latex_options = c("repeat_header"),
+    repeat_header_text = "\\textit{(Forts.)}")
+```
+\renewcommand\arraystretch{1}

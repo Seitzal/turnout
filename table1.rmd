@@ -1,0 +1,65 @@
+```{r}
+sreg1 <- summary(reg1)
+sreg2 <- summary(reg2)
+anova12 <- anova(reg1, reg2)
+report_reg1 <- function(i){
+  str_glue("{round_(reg1$coefficients[i])} & {round_(reg1.pcse$pcse[i])} & {stars.pval(reg1.pcse$pval[i])}")
+}
+report_reg2 <- function(i){
+  str_glue("{round_(reg2$coefficients[i])} & {round_(reg2.pcse$pcse[i])} & {stars.pval(reg2.pcse$pval[i])}")
+}
+```
+\begin{table}[ht]
+\centering
+\begin{threeparttable}[ht]
+\caption{OLS-Regression: Wahlbeteiligung}
+\label{table:1}
+\begin{tabular}{lrllrll}
+\toprule
+& \multicolumn{3}{c}{Modell 1} & \multicolumn{3}{c}{Modell 2}\\
+& $\beta$ & PCSE & & $\beta$ & PCSE & \\
+\midrule
+(Achsenabschnitt) & `r report_reg1(1)` & `r report_reg2(1)`\\
+\addlinespace
+Wahlpflicht & `r report_reg1(2)` & `r report_reg2(2)`\\
+Wahlzyklus & `r report_reg1(3)` & `r report_reg2(3)`\\
+Nationale Wahlb. & `r report_reg1(4)` & `r report_reg2(4)`\\
+Institutionssitz & `r report_reg1(5)` & `r report_reg2(5)`\\
+Landw. Beschäft. & `r report_reg1(6)` & `r report_reg2(6)`\\
+\addlinespace
+Spitzenkandidat*in & & & & `r report_reg2(7)`\\
+Euroskepsis & & & & `r report_reg2(8)`\\
+\addlinespace
+Jahr 1981 & `r report_reg1(7)` & `r report_reg2(9)`\\
+Jahr 1984 & `r report_reg1(8)` & `r report_reg2(10)`\\
+Jahr 1987 & `r report_reg1(9)` & `r report_reg2(11)`\\
+Jahr 1989 & `r report_reg1(10)` & `r report_reg2(12)`\\
+Jahr 1994 & `r report_reg1(11)` & `r report_reg2(13)`\\
+Jahr 1995 & `r report_reg1(12)` & `r report_reg2(14)`\\
+Jahr 1996 & `r report_reg1(13)` & `r report_reg2(15)`\\
+Jahr 1999 & `r report_reg1(14)` & `r report_reg2(16)`\\
+Jahr 2004 & `r report_reg1(15)` & `r report_reg2(17)`\\
+Jahr 2007 & `r report_reg1(16)` & `r report_reg2(18)`\\
+Jahr 2009 & `r report_reg1(17)` & `r report_reg2(19)`\\
+Jahr 2013 & `r report_reg1(18)` & `r report_reg2(20)`\\
+Jahr 2014 & `r report_reg1(19)` & `r report_reg2(21)`\\
+Jahr 2019 & `r report_reg1(20)` & `r report_reg2(22)`\\
+\midrule
+$R^{2}$ &
+\multicolumn{3}{c}{`r round_(sreg1$r.squared)`} & 
+\multicolumn{3}{c}{`r round_(sreg2$r.squared)`}\\
+Freiheitsgrade &
+\multicolumn{3}{c}{`r sreg1$fstatistic[2]`/`r sreg1$fstatistic[3]`} &
+\multicolumn{3}{c}{`r sreg2$fstatistic[2]`/`r sreg2$fstatistic[3]`}\\
+$SQ_{Rest}$ &
+\multicolumn{3}{c}{`r round_(anova12[1,2])`} &
+\multicolumn{3}{c}{`r round_(anova12[2,2])`}\\
+Vgl. $F$-Test & & & &
+\multicolumn{3}{r}{$F =$ `r round_(anova12[2,5])`, $p =$ `r round_(anova12[2,6])`}\\
+\bottomrule
+\end{tabular}
+\begin{tablenotes}
+\item *** $p < 0,001$; **  $p < 0,01$; * $p < 0,05$; . $p < 0,1$
+\end{tablenotes}
+\end{threeparttable}
+\end{table}

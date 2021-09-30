@@ -1,0 +1,15 @@
+\renewcommand\arraystretch{.7}
+```{r 3}
+kable(
+  x = ds %>% arrange(Country) %>% select(C, H, N, E, A, S, T, G), 
+  caption = "Kalibrierte Datenmatrix",
+  format = "latex",
+  digits = 2,
+  linesep = c(""),
+  booktabs = TRUE,
+  longtable = TRUE) %>%
+  kable_styling(
+    latex_options = c("repeat_header"),
+    repeat_header_text = "\\textit{(Forts.)}")
+```
+\renewcommand\arraystretch{1}
